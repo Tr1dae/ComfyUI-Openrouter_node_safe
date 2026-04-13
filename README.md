@@ -1,22 +1,24 @@
 # ComfyUI OpenRouter Node
 
+**This repository:** [github.com/Tr1dae/ComfyUI-Openrouter_node_safe](https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe)  
+**Upstream:** [github.com/gabe-init/ComfyUI-Openrouter_node](https://github.com/gabe-init/ComfyUI-Openrouter_node)
+
 A custom node for ComfyUI that allows you to interact with OpenRouter's API, providing access to a wide range of models.  
 
-## Updates
-
-### 4/5/2026 - Seed, Resolution, Aspect Ratio, Temperature Fix
-- Added **seed** input
-- Added **image_resolution** dropdown (1K, 2K, 4K)
-- Added **aspect_ratio** dropdown with all supported ratios, including Nano Banana 2 only extended ratios (1:4, 4:1, 1:8, 8:1)
-- Fixed temperature slider
-- 0.5K resolution (Nano Banana 2 only) not added - currently broken on OpenRouter's end, see [this thread](https://discord.com/channels/1091220969173028894/1484099048100073484/1484099048100073484) in the OpenRouter Discord
+Now Supporting Nano Banana
 
 ![Nano Banana Example](./nano_banana_example.jpeg)
 
-![OpenRouter Node Example](https://github.com/gabe-init/ComfyUI-Openrouter_node/blob/main/openrouter_node_example.png?raw=true)
+![OpenRouter Node Example](https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe/blob/main/openrouter_node_example.png?raw=true)
 
 Multiple image inputs are supported. Make sure the model you are using supports multiple images to be sent at once. Thanks **@wTechArtist** for the idea!
 ![Multiple Images Example](https://github.com/user-attachments/assets/09f2478c-c4f8-46f0-b79e-e4766f020119)
+
+## Updates
+
+### API key via `.env` (optional widget)
+
+The **api_key** input is optional: leave it empty and set **`OPENROUTER_API_KEY`** in `.env` next to `node.py` (see [`.env.example`](./.env.example)) so keys are not stored in exported workflows. You can still paste a key on the node for temporary use.
 
 ### 9/5/2025 - Added image support for nano-banana and future image models
 
@@ -42,7 +44,7 @@ Added a new Chat Mode feature that lets you store context to enable conversation
 1. Clone this repository into your ComfyUI custom_nodes folder:
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/gabe-init/ComfyUI-Openrouter_node
+git clone https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe
 ```
 
 2. Install the required dependencies:
@@ -50,31 +52,57 @@ git clone https://github.com/gabe-init/ComfyUI-Openrouter_node
 pip install -r requirements.txt
 ```
 
-3. Restart ComfyUI
+3. **API key (recommended):** copy the example env file and add your key so it is not stored in workflow JSON:
+```bash
+cd ComfyUI/custom_nodes/ComfyUI-Openrouter_node_safe
+cp .env.example .env
+# Edit .env and set OPENROUTER_API_KEY=your-key-here
+```
+(If you cloned into a different folder name, run these commands inside that folder instead.)
+See [API key configuration](#api-key-configuration) for details.
+
+4. Restart ComfyUI
 
 ## Usage
 
 The OpenRouter node provides a simple interface to interact with various LLMs through the OpenRouter API.
 
+### API key configuration
+
+You can authenticate in two ways (the node tries the **widget first**, then **`.env`**):
+
+1. **`.env` file (recommended for saved workflows)**  
+   - Path: `.env` in this extension’s root (same folder as `node.py` and `.env.example`).  
+   - Copy [`.env.example`](./.env.example) to `.env` and set **`OPENROUTER_API_KEY`**.  
+   - Optionally use **`OPENROUTER_KEY`** instead; it is only read if `OPENROUTER_API_KEY` is missing or empty.  
+   - Leave the node’s **api_key** field empty so the key is not embedded in exported workflow JSON or images.
+
+2. **Node widget (optional override)**  
+   - Paste a key in the **api_key** field for a quick test or a temporary key.  
+   - If this field is non-empty, it is used instead of `.env`.
+
+If both are missing, the node returns an error naming the expected `.env` path.
+
 ### Inputs
 
 #### Required Inputs:
 
-- **api_key**: Your OpenRouter API key. You can get one from [OpenRouter](https://openrouter.ai/).
 - **system_prompt**: The system prompt that sets the behavior of the LLM.
 - **user_message_box**: The user message to send to the LLM.
 - **model**: The model to use for generation. The node automatically fetches the list of available models from OpenRouter.
 - **web_search**: Enable web search capability by appending `:online` to the model ID. This costs $4 per 1000 queries and automatically uses your openrouter balance.
 - **cheapest**: Route to the cheapest provider by appending `:floor` to the model ID (enabled by default).
 - **fastest**: Route to the fastest provider by appending `:nitro` to the model ID (disabled by default).
+- **image_generation**: Request image output modalities from models that support it.
 - **temperature**: Controls the randomness of the model's output (0.0 to 2.0).
+- **pdf_engine**: Choose between `auto`, `mistral-ocr`, or `pdf-text` for PDF processing.
 - **chat_mode**: Enable conversation mode to maintain context across messages (disabled by default).
 
 #### Optional Inputs:
 
+- **api_key**: Optional OpenRouter API key ([get one here](https://openrouter.ai/)). Leave empty to use **`OPENROUTER_API_KEY`** from `.env` in this extension’s folder (see [API key configuration](#api-key-configuration)).
 - **image_1** through **image_10**: Multiple image inputs for multimodal models. The first image input (image_1) is always visible. Additional image inputs automatically appear as you connect images (up to 10 total).
 - **pdf_data**: PDF document input for models that support document understanding.
-- **pdf_engine**: Choose between "auto", "mistral-ocr", or "pdf-text" for PDF processing.
 - **user_message_input**: Alternative input for the user message, useful for connecting to other nodes.
 
 ### Outputs:
@@ -91,7 +119,7 @@ Note: To display the output text in ComfyUI, you can use the ShowText nodes from
 ### Basic Text Generation
 
 1. Add the OpenRouter node to your workflow
-2. Enter your API key
+2. Configure your API key via `.env` (recommended) or paste it into the optional **api_key** field
 3. Set a system prompt (e.g., "You are a helpful assistant.")
 4. Enter a user message (e.g., "Explain quantum computing in simple terms.")
 5. Select a model (e.g., "openai/gpt-4")
@@ -101,7 +129,7 @@ Note: To display the output text in ComfyUI, you can use the ShowText nodes from
 
 1. Add the OpenRouter node to your workflow
 2. Connect an image output from another node to the "image_1" input
-3. Enter your API key
+3. Ensure your API key is set (`.env` or **api_key** field)
 4. Set a system prompt (e.g., "You are a helpful assistant.")
 5. Enter a user message (e.g., "Describe this image in detail.")
 6. Select a multimodal model (e.g., "openai/gpt-4-vision" or "anthropic/claude-3-opus-20240229")
@@ -122,7 +150,7 @@ Note: To display the output text in ComfyUI, you can use the ShowText nodes from
 ### Image Generation
 
 1. Add the OpenRouter node to your workflow
-2. Enter your API key
+2. Ensure your API key is set (`.env` or **api_key** field)
 3. Set a system prompt (e.g., "You are a helpful assistant.")
 4. Enter a user message with generation keywords (e.g., "Generate a beautiful sunset over mountains", "Create an image of a futuristic city", "Draw a cat wearing a hat")
 5. Select an image-capable model (e.g., "google/gemini-2.5-flash-image-preview" - also known as Nano-Banana)
@@ -184,7 +212,8 @@ python manage_chats.py clean -d 30
 
 ## Troubleshooting
 
-- **Model list not loading**: Check your internet connection and OpenRouter API key.
+- **Model list not loading**: Check your internet connection. The public models list does not require an API key; if the node fails later, verify `.env` or **api_key**.
+- **"No API key" / auth errors**: Confirm `OPENROUTER_API_KEY` in the `.env` file next to `node.py` (same folder as `.env.example`), or set the **api_key** widget. After editing `.env`, restart ComfyUI or queue again so the file is re-read.
 - **Error in response**: Check the error message in the output. It might be due to an invalid API key, model unavailability, or other API issues.
 - **Slow responses**: Try using the `:nitro` modifier by enabling the "fastest" option.
 - **Token counting issues**: The node uses tiktoken for accurate token counting, but falls back to an estimation method if there's an issue.

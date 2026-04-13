@@ -1,0 +1,14 @@
+.github/workflows/publish.yml
+.gitignore
+LICENSE
+README.md
+__init__.py
+chat_manager.py
+examples/chat_mode_example.json
+manage_chats.py
+nano_banana_example.jpeg
+node.py
+openrouter_node_example.png
+pyproject.toml
+requirements.txt
+web/openrouter_dynamic_inputs.js

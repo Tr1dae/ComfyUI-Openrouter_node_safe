@@ -6,10 +6,10 @@ license = {file = "LICENSE"}
 dependencies = ["requests", "tiktoken", "Pillow"]
 
 [project.urls]
-Repository = "https://github.com/gabe-init/ComfyUI-Openrouter_node"
+Repository = "https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = "gabe-init"
-DisplayName = "ComfyUI-Openrouter_node"
+PublisherId = "Tr1dae"
+DisplayName = "ComfyUI-Openrouter_node_safe"
 Icon = ""

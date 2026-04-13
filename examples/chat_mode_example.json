@@ -37,16 +37,17 @@
         "Node name for S&R": "OpenRouterNode"
       },
       "widgets_values": [
-        "",
         "You are a helpful AI assistant. Please provide thoughtful and accurate responses.",
         "Hello! Let's have a conversation.",
         "openai/gpt-3.5-turbo",
         false,
         true,
         false,
+        false,
         1,
         "auto",
-        true
+        true,
+        ""
       ]
     },
     {

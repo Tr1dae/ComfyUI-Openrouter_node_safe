@@ -6,9 +6,61 @@ import io
 import numpy as np
 import torch
 import tiktoken
+from pathlib import Path
 from PIL import Image
 import hashlib # Added for hashing PDF bytes in IS_CHANGED
 from .chat_manager import ChatSessionManager
+
+# API key from .env in this package directory (never required in workflow JSON).
+_PKG_DIR = Path(__file__).resolve().parent
+_DOTENV_PATH = _PKG_DIR / ".env"
+_ENV_KEYS = ("OPENROUTER_API_KEY", "OPENROUTER_KEY")
+
+
+def _strip_env_value(raw: str) -> str:
+    val = raw.strip()
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+        val = val[1:-1]
+    return val
+
+
+def _parse_dotenv_file(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"OpenRouter node: could not read {path}: {e}")
+        return {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, rest = line.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        out[key] = _strip_env_value(rest)
+    return out
+
+
+def _api_key_from_dotenv() -> str:
+    env_map = _parse_dotenv_file(_DOTENV_PATH)
+    for k in _ENV_KEYS:
+        v = env_map.get(k)
+        if v:
+            return v
+    return ""
+
+
+def _dotenv_mtime_ns() -> int:
+    try:
+        return int(_DOTENV_PATH.stat().st_mtime_ns)
+    except OSError:
+        return 0
 
 # Define a placeholder type name for PDF data.
 # The actual input connection will accept '*' but we check the structure.
@@ -40,10 +92,6 @@ class OpenRouterNode:
         """
         return {
             "required": {
-                "api_key": ("STRING", {
-                    "multiline": False,
-                    "default": ""
-                }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
                     "default": "You are a helpful assistant."
@@ -56,37 +104,27 @@ class OpenRouterNode:
                 "web_search": ("BOOLEAN", {"default": False}),
                 "cheapest": ("BOOLEAN", {"default": True}),
                 "fastest": ("BOOLEAN", {"default": False}),
-                "aspect_ratio": ([
-                    "auto",
-                    "1:1 (1024x1024)",
-                    "2:3 (832x1248)",
-                    "3:2 (1248x832)",
-                    "3:4 (864x1184)",
-                    "4:3 (1184x864)",
-                    "4:5 (896x1152)",
-                    "5:4 (1152x896)",
-                    "9:16 (768x1344)",
-                    "16:9 (1344x768)",
-                    "21:9 (1536x672)",
-                    "1:4 (google/gemini-3.1-flash-image-preview (Nano Banana 2) only)",
-                    "4:1 (google/gemini-3.1-flash-image-preview (Nano Banana 2) only)",
-                    "1:8 (google/gemini-3.1-flash-image-preview (Nano Banana 2) only)",
-                    "8:1 (google/gemini-3.1-flash-image-preview (Nano Banana 2) only)",
-                ], {"default": "auto"}),
-                "image_resolution": (["1K", "2K", "4K"], {"default": "1K"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": "fixed"}),
+                "image_generation": ("BOOLEAN", {"default": False}),
                 "temperature": ("FLOAT", {
                     "default": 1.0,
                     "min": 0.0,
                     "max": 2.0,
-                    "step": 0.01,
+                    "step": 0.1,
                     "display": "slider",
-                    "round": 0.01,
+                    "round": 1,
                 }),
                  "pdf_engine": (["auto", "mistral-ocr", "pdf-text"], {"default": "auto"}),
                 "chat_mode": ("BOOLEAN", {"default": False}),
             },
             "optional": {
+                "api_key": ("STRING", {
+                    "multiline": False,
+                    "default": "",
+                    "placeholder": (
+                        "Optional: leave empty to use OPENROUTER_API_KEY from .env "
+                        "in custom_nodes/openrouter_node"
+                    ),
+                }),
                 "pdf_data": (PDF_DATA_TYPE,), # Use '*' and check structure in generate_response
                 "user_message_input": ("STRING", {"forceInput": True}),
             }
@@ -137,13 +175,13 @@ class OpenRouterNode:
         Returns a formatted string with remaining credits.
         """
         if not api_key:
-             return "API Key not provided."
+            return "API Key not provided."
 
         url = "https://openrouter.ai/api/v1/credits"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/yourusername/comfyui-openrouter",
+            "HTTP-Referer": "https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe",
             "X-Title": "ComfyUI OpenRouter LLM Node",
         }
 
@@ -172,10 +210,9 @@ class OpenRouterNode:
         except json.JSONDecodeError:
              return "Error fetching credits: Could not decode JSON response."
 
-    def generate_response(self, api_key, system_prompt, user_message_box, model,
-                         web_search, cheapest, fastest, temperature, pdf_engine, chat_mode,
-                         aspect_ratio="auto", image_resolution="1K", seed=0,
-                         pdf_data=None, user_message_input=None, **kwargs):
+    def generate_response(self, system_prompt, user_message_box, model,
+                         web_search, cheapest, fastest, image_generation, temperature, pdf_engine, chat_mode,
+                         api_key=None, pdf_data=None, user_message_input=None, **kwargs):
         """
         Sends a completion request to the OpenRouter chat completion endpoint.
         Handles text, optional image, and optional PDF inputs.
@@ -188,14 +225,18 @@ class OpenRouterNode:
         """
         # Create empty placeholder image
         placeholder_image = torch.zeros((1, 1, 1, 3), dtype=torch.float32)
-        if not api_key:
-             return ("Error: API Key not provided.", placeholder_image, "Stats N/A", "Credits N/A")
+        effective_key = (api_key or "").strip() or _api_key_from_dotenv()
+        if not effective_key:
+            hint = (
+                f"No API key: paste one above or set OPENROUTER_API_KEY in {_DOTENV_PATH}"
+            )
+            return (f"Error: {hint}", placeholder_image, "Stats N/A", "Credits N/A")
 
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {effective_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/yourusername/comfyui-openrouter",
+            "HTTP-Referer": "https://github.com/Tr1dae/ComfyUI-Openrouter_node_safe",
             "X-Title": "ComfyUI OpenRouter LLM Node",
         }
 
@@ -311,10 +352,13 @@ class OpenRouterNode:
         # Check if model already has modifiers to avoid duplication
         if web_search and ":online" not in modified_model:
             modified_model = f"{modified_model}:online"
+        # Apply :floor/:nitro only if no other modifier is present or relevant
+        # Note: :floor and :nitro might conflict with :online. Check OpenRouter docs for precedence.
+        # Assuming :online takes precedence if specified.
         if ":online" not in modified_model:
              if cheapest and ":floor" not in modified_model:
                  modified_model = f"{modified_model}:floor"
-             elif fastest and not cheapest and ":nitro" not in modified_model:
+             elif fastest and not cheapest and ":nitro" not in modified_model: # Only apply fastest if cheapest is false
                  modified_model = f"{modified_model}:nitro"
 
 
@@ -322,11 +366,15 @@ class OpenRouterNode:
         data = {
             "model": modified_model,
             "messages": messages,
-            "temperature": validated_temp,
-            "seed": seed
+            "temperature": validated_temp
+            # Omitting max_tokens lets the model decide (usually preferred)
         }
-
-        print(f"Payload: model={modified_model}")
+        
+        # Only add modalities parameter if explicitly requested by user
+        # This prevents "Multi-modal output is not supported" errors on text-only models
+        if image_generation:
+            data["modalities"] = ["image", "text"]
+            print(f"Image generation enabled by user setting")
 
         # Add plugins if a specific PDF engine is selected
         if pdf_engine != "auto":
@@ -357,9 +405,6 @@ class OpenRouterNode:
             end_time = time.time()
 
             result = response.json()
-            # Debug: print truncated response to see what OpenRouter returned
-            debug_str = json.dumps(result, default=str)
-            print(f"API response ({len(debug_str)} chars): {debug_str[:500]}")
 
             # --- Extract results and calculate stats ---
             if not result.get("choices") or not result["choices"][0].get("message"):
@@ -449,7 +494,7 @@ class OpenRouterNode:
 
 
             # Fetch credits information AFTER the main request
-            credits_text = self.fetch_credits(api_key)
+            credits_text = self.fetch_credits(effective_key)
 
             # Save conversation in chat mode
             if chat_mode and session_path:
@@ -469,16 +514,15 @@ class OpenRouterNode:
             error_message = f"API Request Error: {str(e)}"
             if hasattr(e, 'response') and e.response is not None:
                 try:
-                    error_detail = e.response.json()
+                    error_detail = e.response.json() # Try to get JSON error detail
                     error_message += f" | Details: {error_detail}"
                 except json.JSONDecodeError:
-                    error_message += f" | Status: {e.response.status_code} | Response: {e.response.text[:200]}"
+                    error_message += f" | Status: {e.response.status_code} | Response: {e.response.text[:200]}" # Show raw text if not JSON
             else:
-                 error_message += " (Network or connection issue)"
-            print(f"ERROR: {error_message}")
+                 error_message += " (Network or connection issue)" # Generic network error
+
             return (error_message, placeholder_image, "Stats N/A due to error", "Credits N/A due to error")
-        except Exception as e:
-             print(f"ERROR: Node Error: {str(e)}")
+        except Exception as e: # Catch other potential errors (e.g., JSON parsing, value errors)
              return (f"Node Error: {str(e)}", placeholder_image, "Stats N/A due to error", "Credits N/A due to error")
 
     @staticmethod
@@ -588,10 +632,9 @@ class OpenRouterNode:
 
 
     @classmethod
-    def IS_CHANGED(cls, api_key, system_prompt, user_message_box, model,
-                   web_search, cheapest, fastest, temperature, pdf_engine, chat_mode,
-                   aspect_ratio="auto", image_resolution="1K", seed=0,
-                   pdf_data=None, user_message_input=None, **kwargs):
+    def IS_CHANGED(cls, system_prompt, user_message_box, model,
+                   web_search, cheapest, fastest, image_generation, temperature, pdf_engine, chat_mode,
+                   api_key=None, pdf_data=None, user_message_input=None, **kwargs):
         """
         Check if any input that affects the output has changed.
         Includes hashing image and PDF data.
@@ -641,11 +684,18 @@ class OpenRouterNode:
             temp_float = 1.0
 
 
+        # Fingerprint API key without forcing secrets into workflow JSON: empty field uses .env mtime.
+        stripped_key = (api_key or "").strip()
+        if stripped_key:
+            api_key_fp = ("inline", hashlib.sha256(stripped_key.encode("utf-8")).hexdigest())
+        else:
+            api_key_fp = ("env", _dotenv_mtime_ns())
+
         # Combine all relevant inputs into a tuple for comparison
         # Use primitive types where possible for reliable hashing/comparison
-        return (api_key, system_prompt, user_message_box, model,
+        return (api_key_fp, system_prompt, user_message_box, model,
                 web_search, cheapest, fastest, temp_float, pdf_engine, chat_mode,
-                aspect_ratio, image_resolution, seed, tuple(image_hashes), pdf_hash, user_message_input)
+                image_generation, tuple(image_hashes), pdf_hash, user_message_input)
 
 # Node class mappings
 NODE_CLASS_MAPPINGS = {
